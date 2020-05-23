@@ -364,6 +364,11 @@ class SessionManager(QObject):
             # don't save sessionless windows (TODO should be configurable)
             if '_nosession' in names:
                 names.remove('_nosession')
+        elif os.path.isabs(name):
+            _save_all_to(name)
+            if load_next_time:
+                configfiles.state['general']['session'] = name
+            return [name]
         else:
             # could possibly support `:session_save session1 session2`?
             names = [name]
@@ -371,21 +376,24 @@ class SessionManager(QObject):
         # current session is not used atm (could be session of current active window)
         for s in names:
             path = self._get_session_path(s)
-            self._dump_session(path, session_data[s])
+            self._dump_session(path, session_data.get(s, { 'windows' : [] }))
 
         if load_next_time:
             configfiles.state['general']['session'] = ','.join(names)
-        return name
+        return names
+
+    def _save_all_to(self, name):
+        session_data = self._save_all()
+        data = {'windows': []}  # type: _JsonType
+        for d in session_data.values():
+            data['windows'].extend(d['windows'])
+        path = self._get_session_path(name)
+        self._dump_session(path, data)
 
     def save_autosave(self):
         """Save the autosave session."""
         try:
-            session_data = self._save_all()
-            data = {'windows': []}  # type: _JsonType
-            for d in session_data.values():
-                data['windows'].extend(d['windows'])
-            path = self._get_session_path('_autosave')
-            self._dump_session(path, data)
+            self._save_all_to('_autosave')
         except SessionError as e:
             log.sessions.error("Failed to save autosave session: {}".format(e))
 
@@ -698,18 +706,17 @@ def session_save(name: ArgType = default, *,
         assert not name.startswith('_')
     try:
         if only_active_window:
-            name = session_manager.save(name, only_window=win_id,
+            names = session_manager.save(name, only_window=win_id,
                                         with_private=True)
         else:
-            name = session_manager.save(name, with_private=with_private)
+            names = session_manager.save(name, with_private=with_private)
     except SessionError as e:
         raise cmdutils.CommandError("Error while saving session: {}".format(e))
     else:
         if quiet:
-            log.sessions.debug("Saved session {}.".format(name))
+            log.sessions.debug("Saved sessions {}.".format(','.join(names)))
         else:
-            #TODO handle Sentinel
-            message.info("Saved session {}.".format(name))
+            message.info("Saved session {}.".format(','.join(names)))
 
 
 @cmdutils.register()
